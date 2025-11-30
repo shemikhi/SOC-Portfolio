@@ -1,131 +1,105 @@
 # Suspicious PowerShell Network Activity — Investigation Report
 
 ## Summary
-A PowerShell process on workstation **DESKTOP-2012UJ93** initiated outbound network connections.  
-This behavior is commonly associated with:
-
-- Malware contacting a command-and-control (C2) server  
-- Payload downloading  
-- Remote command execution frameworks  
-- Automated reconnaissance scripts  
-
-Sysmon recorded both **Event ID 1 (process creation)** and **Event ID 3 (network connection)**.
+A PowerShell process on workstation **DESKTOP-2012UJ93** initiated outbound network activity. PowerShell is commonly abused by adversaries to download payloads, perform reconnaissance, and communicate with command-and-control servers. Sysmon recorded both a PowerShell process creation (Event ID 1) and a network connection attempt (Event ID 3), indicating potentially unauthorized use of PowerShell for external communication.
 
 ---
 
 ## Sysmon Event ID 1 — Process Creation
 
 **Image:**  
-`C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`
+C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe
 
 **User:**  
-`DESKTOP-2012UJ93\sam`
+DESKTOP-2012UJ93\sam
 
 **CommandLine:**  
-*(Insert the actual command line shown in your event)*
+powershell.exe -Command "$a='Write-Host';$b=[System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('SEVMTE8='));iex ($a + ' ' + $b)"
 
-**IntegrityLevel:**  
-High (Administrator execution)
+**Description:**  
+Sysmon detected the creation of a PowerShell process executing a command that uses variable assignment, Base64 decoding, and `iex` (Invoke-Expression). These techniques are frequently leveraged in obfuscated or staged attack workflows. The process ran in a high-integrity context, indicating administrator-level privilege.
 
 **Why This Is Suspicious:**
-- PowerShell executed unexpectedly  
-- High integrity indicates elevated privileges  
-- Potential LOLBAS (living-off-the-land) behavior  
-- Parent process should be validated (cmd.exe / explorer.exe)
-
-**Screenshot:**  
-`powershell-network-event-id-1.png`
+- PowerShell was used for dynamic code execution.
+- The command includes Base64 decoding, an obfuscation behavior.
+- Execution occurred under elevated privileges.
+- The PowerShell process later initiated outbound network communication.
 
 ---
 
 ## Sysmon Event ID 3 — Network Connection
 
-**Protocol:** tcp  
-**SourceIp:** *(example)* 192.168.223.131  
-**SourcePort:** *(example)* Random ephemeral port  
-**DestinationIp:** *(PowerShell target)*  
-**DestinationPort:** 80 / 443  
+**Protocol:** TCP  
+**Source IP:** Local workstation  
+**Destination IP:** External host  
+**Destination Port:** 80 or 443  
 **Image:** powershell.exe  
-**User:** sam  
+**User:** sam
 
-**Suspicious Indicators:**
-- Direct outbound connection from PowerShell  
-- PowerShell acting as a network client → typical for malware  
-- High-integrity process contacting external host  
-- Unusual destination outside the local network  
+**Description:**  
+Sysmon recorded that powershell.exe attempted an outbound network connection. Even if the remote server rejected the request, the attempt itself is a key behavior indicating possible malware staging or C2 communication. Legitimate users rarely use PowerShell for direct web requests unless performing administrative tasks or scripting.
 
-**Screenshot:**  
-`powershell-network-event-id-3.png`
+**Why This Is Suspicious:**
+- PowerShell acted as a network client to an external IP.
+- This behavior frequently aligns with malicious payload retrieval.
+- Execution originated from a high-integrity PowerShell session.
+- Network connections from PowerShell are uncommon in normal user workflows.
 
 ---
 
 ## MITRE ATT&CK Mapping
 
-| Technique | Description |
-|----------|-------------|
-| **T1059.001** | PowerShell Execution |
-| **T1105** | Ingress Tool Transfer (downloads via PowerShell) |
-| **T1027** | Obfuscated/Encoded Commands |
-| **T1083** | System Discovery |
-| **T1218** | Signed Binary Proxy Execution (PowerShell.exe) |
+**T1059.001 — PowerShell**  
+Adversaries abuse PowerShell to execute scripts and commands.
+
+**T1105 — Ingress Tool Transfer**  
+PowerShell is often used to download remote payloads or scripts.
+
+**T1027 — Obfuscated/Encrypted Commands**  
+Base64 encoding and `iex` execution indicate obfuscation.
+
+**T1218 — Signed Binary Proxy Execution (PowerShell.exe)**  
+PowerShell is a trusted signed Windows binary often used to bypass security controls.
 
 ---
 
 ## Analysis
+The combination of PowerShell execution and outbound network activity represents a high-fidelity behavioral indicator of potential malicious activity. PowerShell is a powerful administration tool, but its flexibility makes it an attractive target for attackers.
 
-The presence of **PowerShell network connections** is a strong behavioral indicator of malicious activity.  
-Most legitimate software does not use PowerShell as a network client, except:
+The observed behavior suggests:
 
-- Admin scripts  
-- Automation frameworks  
-- Local dev tools  
+- Possible download attempt of a remote payload.  
+- Use of obfuscation techniques to hide intent.  
+- Execution with elevated privileges.  
+- Typical characteristics of early-stage malware or adversary actions.
 
-Indicators point to:
-
-- Potential payload retrieval  
-- Contact with an external host  
-- Reconnaissance or staging behavior  
-- Abnormal execution context (elevated PowerShell)
-
-Even if the target host did not respond, the *attempt* is enough to be suspicious.
+Even though the destination did not respond, failed outbound attempts are often the first signs of intrusion attempts or automated scripts contacting attacker infrastructure.
 
 ---
 
 ## Recommended SOC Actions
 
-1. **Correlate surrounding events**
-   - Review logon (4624)
-   - Review process creation (4688)
-   - Review registry and file create events
+1. **Review nearby related events**
+   - Logon events (4624)
+   - Additional PowerShell process creation events (Sysmon ID 1)
+   - Script block events (4104), if available
 
-2. **Verify legitimacy**
-   - Was the user sam supposed to run PowerShell?
-   - Was this part of admin or dev activity?
+2. **Inspect the host**
+   - Run antivirus/EDR scans
+   - Examine PowerShell history
+   - Review scheduled tasks, services, and startup entries for persistence
 
-3. **Check for persistence**
-   - Run key modifications (Sysmon ID 13)
-   - Scheduled tasks (ID 4698)
-   - Startup folders
+3. **Evaluate network indicators**
+   - Check firewall logs for repeated outbound attempts
+   - Conduct IP reputation checks on the destination host
+   - Block suspicious destinations if required
 
-4. **Inspect the host**
-   - Run AV/EDR scan
-   - Check for unsigned binaries
-   - Look for additional PowerShell history
-
-5. **Network**
-   - Check firewall logs for follow-up connections
-   - Block suspicious destination IPs if unknown
-
----
-
-## Evidence Files
-
-- `powershell-network-event-id-1.png`  
-- `powershell-network-event-id-3.png`  
+4. **User validation**
+   - Confirm whether the user initiated any legitimate script or admin task
+   - Verify whether this aligns with expected system behavior
 
 ---
 
 ## Conclusion
-PowerShell initiating outbound network connections is a high-value SOC alert.  
-The behavior observed here aligns with malware staging or command-and-control techniques and requires further threat-hunting and host triage.
+PowerShell initiating outbound network communication is a strong indicator of suspicious activity. Combined with obfuscated command execution and elevated privileges, the behavior aligns with techniques used by adversaries for staging, reconnaissance, or command-and-control communication. The host warrants additional investigation to rule out compromise.
 
